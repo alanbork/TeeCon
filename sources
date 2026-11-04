@@ -1,0 +1,36 @@
+#
+# sources - recycler (console tool: send one path to the Recycle Bin
+#           via IFileOperation, and report what the shell actually did)
+#           (consumed by WinDDK 7600.16385.1 build.exe; sits next to
+#           the stock one-line "makefile" holding exactly:
+#           !INCLUDE $(NTMAKEENV)\makefile.def)
+#
+
+# the exe to produce (teecon.exe)
+TARGETNAME=teecon
+# user-mode application, not a driver
+TARGETTYPE=PROGRAM
+# intermediates root; the exe lands in objfre_win7_amd64\amd64
+TARGETPATH=obj
+
+# console subsystem - teecon.cpp has an int main() and writes its report to
+# GetStdHandle(STD_OUTPUT_HANDLE)/STD_ERROR_HANDLE, so it needs a console.
+# (The previous UMTYPE=windows here was copyUndo's GUI setting.)
+UMTYPE=console
+# entry stub = the "main" one. UMENTRY is a case-SENSITIVE string compare in
+# build.exe, so keep it lowercase: "WinMain" (uppercase W) misses the compare
+# and the link fails with "unresolved external symbol main".
+UMENTRY=main
+# link msvcrt.dll, which supplies that entry stub (adds /D_DLL /D_MT)
+USE_MSVCRT=1
+
+# one translation unit, plain C-in-C++ (no STL, so no USE_STL lines needed here)
+SOURCES=teecon.cpp
+
+# kernel32: CRT entry stub, plus pipes (CreatePipe), threads (CreateThread),
+#          process (CreateProcessW + attribute list), console modes, events,
+#          GetCommandLineW, FormatMessageW, file log (CreateFileW/FlushFileBuffers)
+# user32:   kept for parity with the recycler skeleton (console-window checks);
+#           drop it if the link proves clean without it.
+TARGETLIBS=$(SDK_LIB_PATH)\kernel32.lib \
+           $(SDK_LIB_PATH)\user32.lib
