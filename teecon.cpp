@@ -112,8 +112,6 @@ static void out(HANDLE h, const wchar_t *fmt, ...) {
 // ---------------------------------------------------------------- ConPTY session
 // All three ConPTY entry points are resolved with GetProcAddress so the
 // binary still loads on pre-1809 Windows (CpLoad just returns FALSE).
-// If a conpty.dll sits next to the .exe it is preferred over the inbox
-// kernel32 -- that is the NuGet Microsoft.Windows.Console.ConPTY payload.
 
 typedef HRESULT (WINAPI *PFN_CreatePseudoConsole)(COORD, HANDLE, HANDLE, DWORD, HPCON *);
 typedef HRESULT (WINAPI *PFN_ResizePseudoConsole)(HPCON, COORD);
@@ -384,7 +382,7 @@ typedef struct {
 // the repaint carries the recalled text; fullscreen addressing smears.
 // Non-ASCII UTF-8 bytes pass through untouched; column counts bytes, which
 // only misplaces overwrites inside CJK-wide runs - accepted, cmd.exe output
-// here is ASCII. Full-screen programs smear; out of contract (see header).
+// here is ASCII. Full-screen programs smear; out of contract, use -r for those.
 // Invalid/unfinished sequences at chunk end carry over via the held state.
 
 #define VT_LINE 4096
@@ -403,12 +401,10 @@ static BOOL VtEmitLine(VtState *v, HANDLE log) {
     // Trim trailing spaces the erase dance leaves behind, then LF.
     while (v->len && (v->line[v->len - 1] == ' ' || v->line[v->len - 1] == '\t'))
         v->len--;
-    if (v->len || 1) {
+    {
+        BYTE nl = '\n';
         if (v->len && !WriteAll(log, v->line, (DWORD)v->len)) return FALSE;
-        {
-            BYTE nl = '\n';
-            if (!WriteAll(log, &nl, 1)) return FALSE;
-        }
+        if (!WriteAll(log, &nl, 1)) return FALSE;
     }
     v->len = 0;
     v->col = 0;
@@ -726,8 +722,8 @@ typedef struct {
 // There is no SIGWINCH on Windows, and ENABLE_VIRTUAL_TERMINAL_INPUT means
 // we read bytes rather than WINDOW_BUFFER_SIZE_EVENT records, so resize has
 // to be polled. Same thread flushes the log so the hot path stays a plain
-// WriteFile. (OutputThread already flushes per chunk; this is the backstop
-// that keeps a reader-with-an-open-handle fresh between chunks.)
+// WriteFile. (OutputThread never flushes; this tick is what keeps a reader
+// with an open handle fresh, within TICK_MS.)
 static DWORD WINAPI TickThread(LPVOID arg) {
     TickCtx *c = (TickCtx *)arg;
     COORD cur;
@@ -745,7 +741,7 @@ static DWORD WINAPI TickThread(LPVOID arg) {
 }
 
 // ---------------------------------------------------------------- log file
-static HANDLE OpenLog(const wchar_t *path, const wchar_t *cmdline, BOOL append, BOOL hdr) {
+static HANDLE OpenLog(const wchar_t *path, const wchar_t *cmdline, BOOL append, BOOL hdr, BOOL raw) {
     HANDLE h;
     SYSTEMTIME st;
     char chdr[1024];
@@ -770,11 +766,12 @@ static HANDLE OpenLog(const wchar_t *path, const wchar_t *cmdline, BOOL append, 
     GetLocalTime(&st);
     n = _snprintf(chdr, sizeof(chdr),
                   "=== teecon %ls %04d-%02d-%02d %02d:%02d:%02d pid=%lu "
-                  "cmd=%ls ===\r\n",
+                  "cmd=%ls ===%ls",
                   TEECON_VERSION,
                   st.wYear, st.wMonth, st.wDay,
                   st.wHour, st.wMinute, st.wSecond,
-                  (unsigned long)GetCurrentProcessId(), cmdline);
+                  (unsigned long)GetCurrentProcessId(), cmdline,
+                  raw ? L"\r\n" : L"\n");  // match the body: raw=CRLF, flat=LF
     if (n < 0) n = 0;
     if ((size_t)n >= sizeof(chdr)) n = (int)sizeof(chdr) - 1;
     if (n > 0) WriteAll(h, (const BYTE *)chdr, (DWORD)n);
@@ -924,11 +921,13 @@ int main() {
                    (s[4] == 0 || s[4] == L' ' || s[4] == L'\t')) {
             wantNew = TRUE;
             s += 4;
-        } else if (s[1] == L'-' && s[2] == 0) {
+        } else if (s[1] == L'-' &&
+                   (s[2] == 0 || s[2] == L' ' || s[2] == L'\t')) {
             s += 2;  // lone "--": rest of the line is the command
             while (*s == L' ' || *s == L'\t') s++;
             break;
-        } else if (s[1] == L'h' || s[1] == L'?') {
+        } else if ((s[1] == L'h' || s[1] == L'?') &&
+                   (s[2] == 0 || s[2] == L' ' || s[2] == L'\t')) {
             usage();
             return 0;
         } else {
@@ -974,7 +973,7 @@ int main() {
     if (!SetupConsole())
         ERR(L"teecon: warning: stdio is not a console, running without raw mode.\n");
 
-    log = OpenLog(logPath, cmdline, wantAppend, wantHdr);
+    log = OpenLog(logPath, cmdline, wantAppend, wantHdr, wantRaw);
     if (!log) {
         ERR(L"teecon: warning: cannot open log %ls (%lu).\n", logPath, GetLastError());
     }

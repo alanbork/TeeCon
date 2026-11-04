@@ -59,7 +59,8 @@ teecon <logfile> [flags] [[--] <command>]
 Flags take `-` or `/` and are case-insensitive except the `H`/`h` pair:
 `-H` is the header flag, `-h` is help. An unrecognized `-x` token simply
 starts the command. On `-new` the parent exits 0 as soon as the new
-console is spawned.
+console is spawned; if the relaunch cannot be done, `teecon` carries on
+in the current console.
 
 ## Log behavior
 
@@ -75,6 +76,8 @@ console is spawned.
   Default is no header.
 * The log is UTF-8 and opened shared, so a tail or an editor can follow
   it while the run is still going.
+* If neither stdin nor stdout is a console, `teecon` prints a warning and
+  runs without raw console mode; the log still works.
 * Output is recorded before it is echoed, so the console never shows
   anything unrecorded; the disk flush runs on a 200 ms tick.
 * Exit code: the child's exit code passes through. `1` means `teecon`
@@ -93,14 +96,17 @@ Uses the WinDDK 7600.16385.1 (WDK 7.1) environment, e.g.:
 C:\WinDDK7600.16385.1\bin\setenv.bat C:\WinDDK7600.16385.1 fre x64 WIN7 no_oacr
 ```
 
-then build from the project folder:
+then, from the `teecon` folder:
 
 ```bat
-teecon\make.bat
+make.bat
 ```
 
-`make.bat` runs that `setenv.bat` line itself and passes arguments
-through to the build harness.
+`make.bat` runs that `setenv.bat` line itself (unless a WDK environment is
+already active, in which case it builds in the current folder), then hands
+off to the shared `..\b.py` build harness with any arguments passed
+through. If `..\b.py` is not there it falls back to a plain
+`build -gcZ`.
 
 * `sources` holds the project config: `TARGETNAME=teecon`,
   `UMTYPE=console`, `UMENTRY=main`, `SOURCES=teecon.cpp`.
@@ -113,9 +119,7 @@ the compiler used, not a statement about the OS.
 
 ConPTY needs Windows 10 1809 (build 17763). The entry points are resolved
 at runtime, so the binary still loads on older Windows and prints a clear
-"unavailable" message instead of failing to start. A `conpty.dll` next to
-the `.exe` is preferred over the inbox `kernel32` implementation when
-present.
+"unavailable" message instead of failing to start.
 
 ## Why the WDK
 
@@ -136,7 +140,20 @@ it suits a small utility like this one well:
   apps, from console to full GUI, as long as you speak C/C++ from the VC9 era.
 
 Download: [Windows Driver Kit Version 7.1.0](https://www.microsoft.com/en-us/download/details.aspx?id=11800)
-(Microsoft Download Center; it ships as an ~700BM GRMWDK_EN_7600_1.ISO).
+(Microsoft Download Center; it ships as a ~700 MB ISO, `GRMWDK_EN_7600_1.ISO`).
+
+## Testing
+
+```powershell
+.\smoketest.ps1
+```
+
+Runs `teecon.exe` through eight groups of checks (DIR capture, `/K`
+concatenation, `-d`, exit-code passthrough, replace vs `-a`, flat vs `-r`,
+`-H` / `--` / quoted log paths, and usage handling) and ends with a
+PASS/FAIL banner. Scratch files land in `.\tmp` and a transcript in
+`smoke-transcript.log`, both left for inspection; `clean.bat` removes them.
+Not covered: `-new` and fullscreen programs.
 
 ## Files
 
@@ -144,4 +161,6 @@ Download: [Windows Driver Kit Version 7.1.0](https://www.microsoft.com/en-us/dow
 * `sources` — WDK build config.
 * `makefile` — stock WDK one-liner.
 * `make.bat` — project-local WDK build entry point.
-* `clean.bat` — removes build artifacts.
+* `clean.bat` — removes build artifacts and smoke traces.
+* `smoketest.ps1` — functional smoke test.
+

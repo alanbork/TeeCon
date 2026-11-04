@@ -16,10 +16,9 @@ call :rm buildfre_win7_amd64.err
 call :rm buildfre_win7_amd64.wrn
 call :rm .bstate
 rem smoke traces (smoketest.ps1 leaves ./tmp + transcript for inspection;
-rem clean is the ONLY place that removes them). Legacy bat-era traces last.
+rem clean is the ONLY place that removes them).
 call :rm tmp
 call :rm smoke-transcript.log
-call :rm smoke-report.log
 exit /b 0
 
 :rm
